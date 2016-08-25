@@ -45,6 +45,7 @@ using namespace std;
 void get_data(char* f, char* flg, int* n, int** aIn, int** bIn){
   
   //Form
+  cout << "Enter form: 'ikj', 'kij', or 'ijk'.\n";
   cin >> f;
   if(!((strcmp(f, "ijk")==0)||(strcmp(f, "kij")==0)||(strcmp(f,"ikj")==0))){
     cerr << "Invalid form.\n";
@@ -52,6 +53,7 @@ void get_data(char* f, char* flg, int* n, int** aIn, int** bIn){
   }
 
   //Flag
+  cout << "Enter Flag: 'R' for random matrices, 'I' to input matrices.\n";
   cin >> flg;
   if((*flg!='R')&&(*flg!='I')){
     cerr << "Invalid flag.\n"; 
@@ -59,6 +61,7 @@ void get_data(char* f, char* flg, int* n, int** aIn, int** bIn){
   }
 
   //Size
+  cout << "Enter size of one side of the matrices.\n";
   cin >> *n;
   if(*n<1){
     cerr <<"Invalid size.\n";
@@ -71,9 +74,11 @@ void get_data(char* f, char* flg, int* n, int** aIn, int** bIn){
 
   //If flag is 'I', read in arrays
   if(*flg=='I'){
+    cout << "A\n";
     for(int i=0; i<(*n)*(*n); ++i){
       cin >> (*aIn)[i];
     }
+    cout << "B\n";
     for(int i=0; i<(*n)*(*n); ++i){
       cin >> (*bIn)[i];
     }
@@ -113,15 +118,19 @@ int main(){
   //local portions of a and c.
   int*local_a;
   int*local_c;
-  int local_n; //local size (rows of a and c)
+  int* sendCounts; //Local sizes of each process.
+  int* displ;
+//  int* displ;
   //MPI process information variables.
   int comm_sz; 
   int rank;
+  int remainder;
   double startTime; //Time
 
   //Initialize MPI and grab variables
   MPI_Init(NULL, NULL);
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  cout << "Rank " << rank << " PID " << getpid()<< endl;
   MPI_Comm_size(MPI_COMM_WORLD, &comm_sz);
   form=(char*)malloc(3);
   //Get data from input if rank is 0, otherwise wait
@@ -146,22 +155,45 @@ int main(){
     c=(int*)malloc(n*n*sizeof(int));
   }
 
-  //Allocate local arrays
-  local_n=n/comm_sz;
-  local_a=(int*)malloc(local_n*n*sizeof(int));
-  local_c=(int*)malloc(local_n*n*sizeof(int));
-  for(int i=0; i<local_n*n; ++i){
+  //Calculate local sizes.
+  sendCounts = (int*)malloc(comm_sz*sizeof(int));
+  displ=(int*)malloc(comm_sz*sizeof(int));
+  if(rank==0){
+    remainder=n%comm_sz;
+    displ[0]=0;
+    for(int i=0; i<comm_sz; ++i){
+      sendCounts[i]=n/comm_sz;
+      if(i<remainder){
+        sendCounts[i]++;
+      }
+      sendCounts[i]=sendCounts[i]*n;
+      if(i>0){
+        displ[i]=displ[i-1]+sendCounts[i-1];
+      }
+    }
+    for(int i=1; i<comm_sz; ++i){
+      displ[i]=sendCounts[i-1]+displ[i-1];
+    }
+  }
+  cout<<"Bcast " << rank << endl;
+  MPI_Bcast(sendCounts, comm_sz, MPI_INT, 0, MPI_COMM_WORLD);
+  MPI_Bcast(displ, comm_sz, MPI_INT, 0, MPI_COMM_WORLD);
+
+  //Allocate local arrays.
+  local_a=(int*)malloc(sendCounts[rank]*sizeof(int));
+  local_c=(int*)malloc(sendCounts[rank]*sizeof(int));
+  for(int i=0; i<sendCounts[rank]; ++i){
     local_a[i]=0;
     local_c[i]=0;
   }
-
+  
   //Broadcast b, as it is required by all proccesses, and scatter a.
   MPI_Bcast(b, n*n, MPI_INT, 0, MPI_COMM_WORLD);
-  MPI_Scatter(a, n*local_n, MPI_INT, local_a, n*local_n, MPI_INT, 0, MPI_COMM_WORLD);
+  MPI_Scatterv(a, sendCounts, displ, MPI_INT, local_a, sendCounts[rank], MPI_INT, 0, MPI_COMM_WORLD);
 
   //Calculate local solution using the specified form.
   if(strcmp(form, "ijk")==0){
-    for(int i=0; i<local_n; ++i){
+    for(int i=0; i<sendCounts[rank]/n; ++i){
       for(int j=0; j<n; ++j){
         for(int k=0; k<n; ++k){
           local_c[i*n+j]+=local_a[i*n+k]*b[k*n+j]; 
@@ -170,7 +202,7 @@ int main(){
     }
   }
   else if(strcmp(form,"ikj")==0){
-    for(int i=0; i<local_n; ++i){
+    for(int i=0; i<sendCounts[rank]/n; ++i){
       for(int k=0; k<n; ++k){
         for(int j=0; j<n; ++j){
           local_c[i*n+j]+=local_a[i*n+k]*b[k*n+j];
@@ -180,7 +212,7 @@ int main(){
   }
   else if(strcmp(form, "kij")==0){
     for(int k=0; k<n; ++k){
-      for(int i=0; i<local_n; ++i){
+      for(int i=0; i<sendCounts[rank]/n; ++i){
         for(int j=0; j<n; ++j){
           local_c[i*n+j]+=local_a[i*n+k]*b[k*n+j];
         }
@@ -189,7 +221,7 @@ int main(){
   }
 
   //Gather local results to proccess 0, and print timing/solution.
-  MPI_Gather(local_c, n*local_n, MPI_INT, c, n*local_n, MPI_INT, 0, MPI_COMM_WORLD); 
+  MPI_Gatherv(local_c, sendCounts[rank], MPI_INT, c, sendCounts, displ, MPI_INT, 0, MPI_COMM_WORLD);  
   if(rank==0){
     cout << "running on " << comm_sz << " processors\n" << "elapsed time = "<< MPI_Wtime()-startTime << " seconds\n";
     if(flag=='I'){
@@ -206,6 +238,7 @@ int main(){
   free(local_a);
   free(local_c);
   free(form);
+  free(sendCounts);
   if(rank==0) free(a);
   free(b);
   if(rank==0) free(c);
