@@ -53,10 +53,10 @@ void get_data(char* f, char* flg, int* n, int** aIn, int** bIn){
   }
 
   //Flag
-  cout << "Enter Flag: 'R' for random matrices, 'I' to input matrices.\n";
+  cout << "Type I to input matrices, R to randomly generate.\n";
   cin >> flg;
-  if((*flg!='R')&&(*flg!='I')){
-    cerr << "Invalid flag.\n"; 
+  if(*flg!='R' && *flg!='I'){
+    cerr << "Invalid flag.\n";
     exit(1);
   }
 
@@ -120,7 +120,6 @@ int main(){
   int*local_c;
   int* sendCounts; //Local sizes of each process.
   int* displ;
-//  int* displ;
   //MPI process information variables.
   int comm_sz; 
   int rank;
@@ -130,9 +129,9 @@ int main(){
   //Initialize MPI and grab variables
   MPI_Init(NULL, NULL);
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-  cout << "Rank " << rank << " PID " << getpid()<< endl;
   MPI_Comm_size(MPI_COMM_WORLD, &comm_sz);
   form=(char*)malloc(3);
+
   //Get data from input if rank is 0, otherwise wait
   if(rank==0){
     get_data(form, &flag, &n, &a, &b);
@@ -147,7 +146,8 @@ int main(){
   MPI_Bcast(form, 4, MPI_CHAR, 0, MPI_COMM_WORLD);
 
   //Allocate b if we are not rank 0, otherwise we are rank 0 so allocate c.
-  //b is required for all proccesses. c is the where we gather the solution, so it is not required.
+  //b is required for all proccesses. c is the where we gather the solution,
+  //so it is not required.
   if(rank!=0){
     b=(int*)malloc(n*n*sizeof(int)); 
   }
@@ -175,7 +175,6 @@ int main(){
       displ[i]=sendCounts[i-1]+displ[i-1];
     }
   }
-  cout<<"Bcast " << rank << endl;
   MPI_Bcast(sendCounts, comm_sz, MPI_INT, 0, MPI_COMM_WORLD);
   MPI_Bcast(displ, comm_sz, MPI_INT, 0, MPI_COMM_WORLD);
 
