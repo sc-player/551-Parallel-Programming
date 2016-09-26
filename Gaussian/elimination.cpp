@@ -32,6 +32,7 @@ int main(int argc, char*argv[]){
   double conversionFactor;
   int threads;
   double startTime;
+  double tmp;
 
   //Check usage and get the command line arguments.
   if(argc!=3){
@@ -109,11 +110,16 @@ int main(int argc, char*argv[]){
   }
 
   //Back substitution.
+#pragma omp parallel num_threads(threads) default(none) shared(A, b, n, tmp)
   for(int i=n-1; i>=0; --i){    
-    for(int j=n-1; j>i; --j){
-      b[i]-=A[i][j]*b[j];
+# pragma omp single
+    tmp = b[i];
+#pragma omp for reduction(+:tmp) schedule(static)
+    for(int j=i+1; j<n; ++j){
+      tmp-=A[i][j]*b[j];
     }
-    b[i]=b[i]/A[i][i];
+#pragma omp single
+    b[i]=tmp/A[i][i];
   } 
 
   //Print the final time.
